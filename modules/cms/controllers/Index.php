@@ -1,16 +1,13 @@
 <?php namespace Cms\Controllers;
 
-use URL;
+use Url;
 use Lang;
 use Flash;
-use Event;
 use Config;
 use Request;
 use Response;
 use Exception;
 use BackendMenu;
-use Backend\Classes\Controller;
-use Backend\Classes\WidgetManager;
 use Cms\Widgets\AssetList;
 use Cms\Widgets\TemplateList;
 use Cms\Widgets\ComponentList;
@@ -23,9 +20,11 @@ use Cms\Classes\Content;
 use Cms\Classes\CmsCompoundObject;
 use Cms\Classes\ComponentManager;
 use Cms\Classes\ComponentPartial;
-use ApplicationException;
-use Backend\Traits\InspectableContainer;
+use Backend\Classes\Controller;
+use Backend\Classes\WidgetManager;
 use October\Rain\Router\Router as RainRouter;
+use ApplicationException;
+use Cms\Classes\Asset;
 
 /**
  * CMS index
@@ -35,11 +34,23 @@ use October\Rain\Router\Router as RainRouter;
  */
 class Index extends Controller
 {
-    use InspectableContainer;
+    use \Backend\Traits\InspectableContainer;
 
+    /**
+     * @var Cms\Classes\Theme
+     */
     protected $theme;
 
-    public $requiredPermissions = ['cms.*'];
+    /**
+     * @var array Permissions required to view this page.
+     */
+    public $requiredPermissions = [
+        'cms.manage_content',
+        'cms.manage_assets',
+        'cms.manage_pages',
+        'cms.manage_layouts',
+        'cms.manage_partials'
+    ];
 
     /**
      * Constructor.
@@ -97,7 +108,7 @@ class Index extends Controller
         // before it loads dynamically.
         $this->addJs('/modules/backend/formwidgets/codeeditor/assets/js/build-min.js', 'core');
 
-        $this->bodyClass = 'compact-container side-panel-not-fixed';
+        $this->bodyClass = 'compact-container';
         $this->pageTitle = 'cms::lang.cms.menu_label';
         $this->pageTitleTemplate = '%s '.trans($this->pageTitle);
 
@@ -116,7 +127,7 @@ class Index extends Controller
 
         $this->vars['templatePath'] = Request::input('path');
 
-        if ($type == 'page') {
+        if ($type === 'page') {
             $router = new RainRouter;
             $this->vars['pageUrl'] = $router->urlFromPattern($template->url);
         }
@@ -138,24 +149,36 @@ class Index extends Controller
         $type = Request::input('templateType');
         $templatePath = trim(Request::input('templatePath'));
         $template = $templatePath ? $this->loadTemplate($type, $templatePath) : $this->createTemplate($type);
+        $formWidget = $this->makeTemplateFormWidget($type, $template);
 
-        $settings = Request::input('settings') ?: [];
+        $saveData = $formWidget->getSaveData();
+        $postData = post();
+        $templateData = [];
+
+        $settings = array_get($saveData, 'settings', []) + Request::input('settings', []);
         $settings = $this->upgradeSettings($settings);
 
-        $templateData = [];
         if ($settings) {
             $templateData['settings'] = $settings;
         }
 
         $fields = ['markup', 'code', 'fileName', 'content'];
+
         foreach ($fields as $field) {
-            if (array_key_exists($field, $_POST)) {
-                $templateData[$field] = Request::input($field);
+            if (array_key_exists($field, $saveData)) {
+                $templateData[$field] = $saveData[$field];
+            }
+            elseif (array_key_exists($field, $postData)) {
+                $templateData[$field] = $postData[$field];
             }
         }
 
         if (!empty($templateData['markup']) && Config::get('cms.convertLineEndings', false) === true) {
             $templateData['markup'] = $this->convertLineEndings($templateData['markup']);
+        }
+
+        if (!empty($templateData['code']) && Config::get('cms.convertLineEndings', false) === true) {
+            $templateData['code'] = $this->convertLineEndings($templateData['code']);
         }
 
         if (!Request::input('templateForceSave') && $template->mtime) {
@@ -164,14 +187,14 @@ class Index extends Controller
             }
         }
 
+        $template->attributes = [];
         $template->fill($templateData);
         $template->save();
 
         /*
          * Extensibility
          */
-        Event::fire('cms.template.save', [$this, $template, $type]);
-        $this->fireEvent('template.save', [$template, $type]);
+        $this->fireSystemEvent('cms.template.save', [$template, $type]);
 
         Flash::success(Lang::get('cms::lang.template.saved'));
 
@@ -181,8 +204,8 @@ class Index extends Controller
             'tabTitle'      => $this->getTabTitle($type, $template)
         ];
 
-        if ($type == 'page') {
-            $result['pageUrl'] = URL::to($template->url);
+        if ($type === 'page') {
+            $result['pageUrl'] = Url::to($template->url);
             $router = new Router($this->theme);
             $router->clearCache();
             CmsCompoundObject::clearCache($this->theme);
@@ -201,8 +224,8 @@ class Index extends Controller
         $type = Request::input('type');
         $template = $this->createTemplate($type);
 
-        if ($type == 'asset') {
-            $template->setInitialPath($this->widget->assetList->getCurrentRelativePath());
+        if ($type === 'asset') {
+            $template->fileName = $this->widget->assetList->getCurrentRelativePath();
         }
 
         $widget = $this->makeTemplateFormWidget($type, $template);
@@ -211,7 +234,7 @@ class Index extends Controller
 
         return [
             'tabTitle' => $this->getTabTitle($type, $template),
-            'tab'   => $this->makePartial('form_page', [
+            'tab'      => $this->makePartial('form_page', [
                 'form'          => $widget,
                 'templateType'  => $type,
                 'templateTheme' => $this->theme->getDirName(),
@@ -244,8 +267,7 @@ class Index extends Controller
         /*
          * Extensibility
          */
-        Event::fire('cms.template.delete', [$this, $type]);
-        $this->fireEvent('template.delete', [$type]);
+        $this->fireSystemEvent('cms.template.delete', [$type]);
 
         return [
             'deleted' => $deleted,
@@ -265,15 +287,14 @@ class Index extends Controller
         /*
          * Extensibility
          */
-        Event::fire('cms.template.delete', [$this, $type]);
-        $this->fireEvent('template.delete', [$type]);
+        $this->fireSystemEvent('cms.template.delete', [$type]);
     }
 
     public function onGetTemplateList()
     {
         $this->validateRequestTheme();
 
-        $page = new Page($this->theme);
+        $page = Page::inTheme($this->theme);
         return [
             'layouts' => $page->getLayoutOptions()
         ];
@@ -286,7 +307,7 @@ class Index extends Controller
         }
 
         // Can only expand components at this stage
-        if ((!$type = post('tokenType')) && $type != 'component') {
+        if ((!$type = post('tokenType')) && $type !== 'component') {
             return;
         }
 
@@ -325,11 +346,11 @@ class Index extends Controller
     protected function resolveTypeClassName($type)
     {
         $types = [
-            'page'    => '\Cms\Classes\Page',
-            'partial' => '\Cms\Classes\Partial',
-            'layout'  => '\Cms\Classes\Layout',
-            'content' => '\Cms\Classes\Content',
-            'asset'   => '\Cms\Classes\Asset'
+            'page'    => Page::class,
+            'partial' => Partial::class,
+            'layout'  => Layout::class,
+            'content' => Content::class,
+            'asset'   => Asset::class
         ];
 
         if (!array_key_exists($type, $types)) {
@@ -343,11 +364,14 @@ class Index extends Controller
     {
         $class = $this->resolveTypeClassName($type);
 
-        if (!($template = call_user_func(array($class, 'load'), $this->theme, $path))) {
+        if (!($template = call_user_func([$class, 'load'], $this->theme, $path))) {
             throw new ApplicationException(trans('cms::lang.template.not_found'));
         }
 
-        Event::fire('cms.template.processSettingsAfterLoad', [$this, $template]);
+        /*
+         * Extensibility
+         */
+        $this->fireSystemEvent('cms.template.processSettingsAfterLoad', [$template]);
 
         return $template;
     }
@@ -356,7 +380,7 @@ class Index extends Controller
     {
         $class = $this->resolveTypeClassName($type);
 
-        if (!($template = new $class($this->theme))) {
+        if (!($template = $class::inTheme($this->theme))) {
             throw new ApplicationException(trans('cms::lang.template.not_found'));
         }
 
@@ -365,7 +389,7 @@ class Index extends Controller
 
     protected function getTabTitle($type, $template)
     {
-        if ($type == 'page') {
+        if ($type === 'page') {
             $result = $template->title ?: $template->getFileName();
             if (!$result) {
                 $result = trans('cms::lang.page.new');
@@ -374,7 +398,7 @@ class Index extends Controller
             return $result;
         }
 
-        if ($type == 'partial' || $type == 'layout' || $type == 'content' || $type == 'asset') {
+        if ($type === 'partial' || $type === 'layout' || $type === 'content' || $type === 'asset') {
             $result = in_array($type, ['asset', 'content']) ? $template->getFileName() : $template->getBaseFileName();
             if (!$result) {
                 $result = trans('cms::lang.'.$type.'.new');
@@ -456,11 +480,9 @@ class Index extends Controller
         /*
          * Extensibility
          */
-        $dataHolder = (object)[
-            'settings' => $settings
-        ];
+        $dataHolder = (object) ['settings' => $settings];
 
-        Event::fire('cms.template.processSettingsBeforeSave', [$this, $dataHolder]);
+        $this->fireSystemEvent('cms.template.processSettingsBeforeSave', [$dataHolder]);
 
         return $dataHolder->settings;
     }
@@ -483,8 +505,8 @@ class Index extends Controller
      */
     protected function convertLineEndings($markup)
     {
-        $markup = str_replace("\r\n", "\n", $markup);
-        $markup = str_replace("\r", "\n", $markup);
+        $markup = str_replace(["\r\n", "\r"], "\n", $markup);
+
         return $markup;
     }
 }

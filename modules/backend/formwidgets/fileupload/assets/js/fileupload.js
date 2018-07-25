@@ -3,7 +3,7 @@
  *
  * Data attributes:
  * - data-control="fileupload" - enables the file upload plugin
- * - data-unique-id="XXX" - an optional identifier for multiple uploaders on the same page, this value will 
+ * - data-unique-id="XXX" - an optional identifier for multiple uploaders on the same page, this value will
  *   appear in the postback variable called X_OCTOBER_FILEUPLOAD
  * - data-template - a Dropzone.js template to use for each item
  * - data-error-template - a popover template used to show an error
@@ -85,7 +85,7 @@
         this.$filesContainer = null
         this.uploaderOptions = null
 
-        // In some cases options could contain callbacks, 
+        // In some cases options could contain callbacks,
         // so it's better to clean them up too.
         this.options = null
 
@@ -124,6 +124,8 @@
         this.uploaderOptions.thumbnailHeight = this.options.thumbnailHeight
             ? this.options.thumbnailHeight : null
 
+        this.uploaderOptions.resize = this.onResizeFileInfo
+
         /*
          * Add CSRF token to headers
          */
@@ -137,6 +139,40 @@
         this.dropzone.on('sending', this.proxy(this.onUploadSending))
         this.dropzone.on('success', this.proxy(this.onUploadSuccess))
         this.dropzone.on('error', this.proxy(this.onUploadError))
+    }
+
+    FileUpload.prototype.onResizeFileInfo = function(file) {
+        var info,
+            targetWidth,
+            targetHeight
+
+        if (!this.options.thumbnailWidth && !this.options.thumbnailWidth) {
+            targetWidth = targetHeight = 100
+        }
+        else if (this.options.thumbnailWidth) {
+            targetWidth = this.options.thumbnailWidth
+            targetHeight = this.options.thumbnailWidth * file.height / file.width
+        }
+        else if (this.options.thumbnailHeight) {
+            targetWidth = this.options.thumbnailHeight * file.height / file.width
+            targetHeight = this.options.thumbnailHeight
+        }
+
+        // drawImage(image, srcX, srcY, srcWidth, srcHeight, trgX, trgY, trgWidth, trgHeight) takes an image, clips it to
+        // the rectangle (srcX, srcY, srcWidth, srcHeight), scales it to dimensions (trgWidth, trgHeight), and draws it
+        // on the canvas at coordinates (trgX, trgY).
+        info = {
+            srcX: 0,
+            srcY: 0,
+            srcWidth: file.width,
+            srcHeight: file.height,
+            trgX: 0,
+            trgY: 0,
+            trgWidth: targetWidth,
+            trgHeight: targetHeight
+        }
+
+        return info
     }
 
     FileUpload.prototype.onUploadAddedFile = function(file) {
@@ -167,15 +203,19 @@
             $img.attr('src', response.thumb)
         }
 
-        /*
-         * Trigger change event (Compatability with october.form.js)
-         */
-        this.$el.closest('[data-field-name]').trigger('change.oc.formwidget')
+        this.triggerChange();
     }
 
     FileUpload.prototype.onUploadError = function(file, error) {
         var $preview = $(file.previewElement)
         $preview.addClass('is-error')
+    }
+
+    /*
+     * Trigger change event (Compatibility with october.form.js)
+     */
+    FileUpload.prototype.triggerChange = function() {
+        this.$el.closest('[data-field-name]').trigger('change.oc.formwidget')
     }
 
     FileUpload.prototype.addExtraFormData = function(formData) {
@@ -271,6 +311,7 @@
             .one('ajaxDone', function(){
                 self.removeFileFromElement($object)
                 self.evalIsPopulated()
+                self.triggerChange()
             })
             .request()
 

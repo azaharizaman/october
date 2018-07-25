@@ -4,6 +4,7 @@ use Lang;
 use Cms\Classes\Theme;
 use Cms\Classes\Layout;
 use ApplicationException;
+use October\Rain\Filesystem\Definitions as FileDefinitions;
 
 /**
  * The CMS page class.
@@ -14,25 +15,49 @@ use ApplicationException;
 class Page extends CmsCompoundObject
 {
     /**
+     * @var string The container name associated with the model, eg: pages.
+     */
+    protected $dirName = 'pages';
+
+    /**
+     * @var array The attributes that are mass assignable.
+     */
+    protected $fillable = [
+        'url',
+        'layout',
+        'title',
+        'description',
+        'is_hidden',
+        'meta_title',
+        'meta_description',
+        'markup',
+        'settings',
+        'code'
+    ];
+
+    /**
      * @var array The API bag allows the API handler code to bind arbitrary
      * data to the page object.
      */
     public $apiBag = [];
 
-    protected $settingsValidationRules = [
+    /**
+     * @var array The rules to be applied to the data.
+     */
+    public $rules = [
         'title' => 'required',
         'url'   => ['required', 'regex:/^\/[a-z0-9\/\:_\-\*\[\]\+\?\|\.\^\\\$]*$/i']
     ];
 
     /**
      * Creates an instance of the object and associates it with a CMS theme.
-     * @param \Cms\Classes\Theme $theme Specifies the theme the object belongs to.
+     * @param array $attributes
      */
-    public function __construct(Theme $theme = null)
+    public function __construct(array $attributes = [])
     {
-        parent::__construct($theme);
+        parent::__construct($attributes);
 
-        $this->settingsValidationMessages = [
+        $this->customMessages = [
             'url.regex' => Lang::get('cms::lang.page.invalid_url')
         ];
     }
@@ -42,30 +67,20 @@ class Page extends CmsCompoundObject
     }
 
     /**
-     * Returns the directory name corresponding to the object type.
-     * For pages the directory name is "pages", for layouts - "layouts", etc.
-     * @return string
-     */
-    public static function getObjectTypeDirName()
-    {
-        return 'pages';
-    }
-
-    /**
      * Returns name of a PHP class to us a parent for the PHP class created for the object's PHP section.
      * @return mixed Returns the class name or null.
      */
-    public function getCodeClassParent()
+    public function getCodeClassParent() : string
     {
-        return '\Cms\Classes\PageCode';
+        return PageCode::class;
     }
 
     /**
-     * Returns a list of layouts available in the theme. 
+     * Returns a list of layouts available in the theme.
      * This method is used by the form widget.
      * @return array Returns an array of strings.
      */
-    public function getLayoutOptions()
+    public function getLayoutOptions() : array
     {
         if (!($theme = Theme::getEditTheme())) {
             throw new ApplicationException(Lang::get('cms::lang.theme.edit.not_found'));
@@ -74,8 +89,14 @@ class Page extends CmsCompoundObject
         $layouts = Layout::listInTheme($theme, true);
         $result = [];
         $result[null] = Lang::get('cms::lang.page.no_layout');
+
         foreach ($layouts as $layout) {
             $baseName = $layout->getBaseFileName();
+
+            if (FileDefinitions::isPathIgnored($baseName)) {
+                continue;
+            }
+
             $result[$baseName] = strlen($layout->name) ? $layout->name : $baseName;
         }
 
@@ -86,12 +107,12 @@ class Page extends CmsCompoundObject
      * Helper that returns a nicer list of pages for use in dropdowns.
      * @return array
      */
-    public static function getNameList()
+    public static function getNameList() : array
     {
         $result = [];
         $pages = self::sortBy('baseFileName')->all();
         foreach ($pages as $page) {
-            $result[$page->baseFileName] = $page->title.' ('.$page->baseFileName.')';
+            $result[$page->baseFileName] = $page->title . ' (' . $page->baseFileName . ')';
         }
 
         return $result;
@@ -103,7 +124,7 @@ class Page extends CmsCompoundObject
      * @param array $params Route parameters to consider in the URL.
      * @return string
      */
-    public static function url($page, $params = [])
+    public static function url($page, array $params = []) : string
     {
         /*
          * Reuse existing controller or create a new one,
@@ -132,16 +153,17 @@ class Page extends CmsCompoundObject
      * @param string $type Specifies the menu item type
      * @return array Returns an array
      */
-    public static function getMenuTypeInfo($type)
+    public static function getMenuTypeInfo(string $type) : array
     {
         $result = [];
 
-        if ($type == 'cms-page') {
+        if ($type === 'cms-page') {
             $theme = Theme::getActiveTheme();
             $pages = self::listInTheme($theme, true);
+            $references = [];
 
             foreach ($pages as $page) {
-                $references[$page->getBaseFileName()] = $page->title . ' ['.$page->getBaseFileName().']';
+                $references[$page->getBaseFileName()] = $page->title . ' [' . $page->getBaseFileName() . ']';
             }
 
             $result = [
@@ -160,10 +182,10 @@ class Page extends CmsCompoundObject
      * with the following keys:
      * - url - the menu item URL. Not required for menu item types that return all available records.
      *   The URL should be returned relative to the website root and include the subdirectory, if any.
-     *   Use the URL::to() helper to generate the URLs.
-     * - isActive - determines whether the menu item is active. Not required for menu item types that 
+     *   Use the Url::to() helper to generate the URLs.
+     * - isActive - determines whether the menu item is active. Not required for menu item types that
      *   return all available records.
-     * - items - an array of arrays with the same keys (url, isActive, items) + the title key. 
+     * - items - an array of arrays with the same keys (url, isActive, items) + the title key.
      *   The items array should be added only if the $item's $nesting property value is TRUE.
      * @param \RainLab\Pages\Classes\MenuItem $item Specifies the menu item.
      * @param string $url Specifies the current page URL, normalized, in lower case
@@ -171,11 +193,11 @@ class Page extends CmsCompoundObject
      * The URL is specified relative to the website root, it includes the subdirectory name, if any.
      * @return mixed Returns an array. Returns null if the item cannot be resolved.
      */
-    public static function resolveMenuItem($item, $url, $theme)
+    public static function resolveMenuItem($item, string $url, Theme $theme)
     {
         $result = null;
 
-        if ($item->type == 'cms-page') {
+        if ($item->type === 'cms-page') {
             if (!$item->reference) {
                 return;
             }
@@ -199,11 +221,11 @@ class Page extends CmsCompoundObject
      * @param string $type Specifies the page link type
      * @return array
      */
-    public static function getRichEditorTypeInfo($type)
+    public static function getRichEditorTypeInfo(string $type) : array
     {
         $result = [];
 
-        if ($type == 'cms-page') {
+        if ($type === 'cms-page') {
             $theme = Theme::getActiveTheme();
             $pages = self::listInTheme($theme, true);
 

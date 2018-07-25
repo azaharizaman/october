@@ -1,5 +1,6 @@
 <?php namespace Backend\Classes;
 
+use Str;
 use Html;
 use October\Rain\Database\Model;
 use October\Rain\Html\Helper as HtmlHelper;
@@ -19,13 +20,19 @@ class FormField
     const NO_SAVE_DATA = -1;
 
     /**
+     * @var string A special character in yaml config files to indicate a field higher in hierarchy
+     */
+    const HIERARCHY_UP = '^';
+
+    /**
      * @var string Form field name.
      */
     public $fieldName;
 
     /**
-     * @var string If the field element names should be contained in an array.
-     * Eg: <input name="nameArray[fieldName]" />
+     * @var string If the field element names should be contained in an array. Eg:
+     *
+     *     <input name="nameArray[fieldName]" />
      */
     public $arrayName;
 
@@ -92,7 +99,12 @@ class FormField
     /**
      * @var bool Specifies if this field is mandatory.
      */
-    public $required = false;
+    public $required = null;
+
+    /**
+     * @var bool Specify if the field is read-only or not.
+     */
+    public $readOnly = false;
 
     /**
      * @var bool Specify if the field is disabled or not.
@@ -262,17 +274,19 @@ class FormField
          * Standard config:property values
          */
         $applyConfigValues = [
-            'context',
+            'commentHtml',
             'placeholder',
-            'cssClass',
             'dependsOn',
+            'required',
+            'readOnly',
+            'disabled',
+            'cssClass',
+            'stretch',
+            'context',
+            'hidden',
             'trigger',
             'preset',
             'path',
-            'required',
-            'disabled',
-            'hidden',
-            'stretch',
         ];
 
         foreach ($applyConfigValues as $value) {
@@ -332,12 +346,30 @@ class FormField
      * @param bool $isHtml Set to true if you use HTML formatting in the comment
      * Supported values are 'below' and 'above'
      */
-    public function comment($text, $position = 'below', $isHtml = false)
+    public function comment($text, $position = 'below', $isHtml = null)
     {
         $this->comment = $text;
         $this->commentPosition = $position;
-        $this->commentHtml = $isHtml;
+
+        if ($isHtml !== null) {
+            $this->commentHtml = $isHtml;
+        }
+
         return $this;
+    }
+
+    /**
+     * Determine if the provided value matches this field's value.
+     * @param string $value
+     * @return bool
+     */
+    public function isSelected($value = true)
+    {
+        if ($this->value === null) {
+            return false;
+        }
+
+        return (string) $value === (string) $this->value;
     }
 
     /**
@@ -412,6 +444,10 @@ class FormField
             $attributes = $attributes + ['disabled' => 'disabled'];
         }
 
+        if ($position == 'field' && $this->readOnly) {
+            $attributes = $attributes + ['readonly' => 'readonly'];
+        }
+
         return $attributes;
     }
 
@@ -430,6 +466,8 @@ class FormField
         $triggerAction = array_get($this->trigger, 'action');
         $triggerField = array_get($this->trigger, 'field');
         $triggerCondition = array_get($this->trigger, 'condition');
+        $triggerForm = $this->arrayName;
+        $triggerMulti = '';
 
         // Apply these to container
         if (in_array($triggerAction, ['hide', 'show']) && $position != 'container') {
@@ -441,11 +479,26 @@ class FormField
             return $attributes;
         }
 
+        // Reduce the field reference for the trigger condition field
+        $triggerFieldParentLevel = Str::getPrecedingSymbols($triggerField, self::HIERARCHY_UP);
+        if ($triggerFieldParentLevel > 0) {
+            // Remove the preceding symbols from the trigger field name
+            $triggerField = substr($triggerField, $triggerFieldParentLevel);
+            $triggerForm = HtmlHelper::reduceNameHierarchy($triggerForm, $triggerFieldParentLevel);
+        }
+
+        // Preserve multi field types
+        if (Str::endsWith($triggerField, '[]')) {
+            $triggerField = substr($triggerField, 0, -2);
+            $triggerMulti = '[]';
+        }
+
+        // Final compilation
         if ($this->arrayName) {
-            $fullTriggerField = $this->arrayName.'['.implode('][', HtmlHelper::nameToArray($triggerField)).']';
+            $fullTriggerField = $triggerForm.'['.implode('][', HtmlHelper::nameToArray($triggerField)).']'.$triggerMulti;
         }
         else {
-            $fullTriggerField = $triggerField;
+            $fullTriggerField = $triggerField.$triggerMulti;
         }
 
         $newAttributes = [
@@ -456,6 +509,7 @@ class FormField
         ];
 
         $attributes = $attributes + $newAttributes;
+
         return $attributes;
     }
 
@@ -544,6 +598,17 @@ class FormField
     }
 
     /**
+     * Returns a raw config item value.
+     * @param  string $value
+     * @param  string $default
+     * @return mixed
+     */
+    public function getConfig($value, $default = null)
+    {
+        return array_get($this->config, $value, $default);
+    }
+
+    /**
      * Returns this fields value from a supplied data set, which can be
      * an array or a model or another generic collection.
      * @param mixed $data
@@ -576,8 +641,10 @@ class FormField
     }
 
     /**
-     * Returns the final model and attribute name of a nested attribute.
-     * Eg: list($model, $attribute) = $this->resolveAttribute('person[phone]');
+     * Returns the final model and attribute name of a nested attribute. Eg:
+     *
+     *     list($model, $attribute) = $this->resolveAttribute('person[phone]');
+     *
      * @param  string $attribute.
      * @return array
      */
