@@ -45,9 +45,12 @@ return [
         'invalid_audio_empty_insert' => 'Please select an audio file to insert.',
     ],
     'alert' => [
+        'error' => 'Error',
+        'confirm' => 'Confirm',
+        'dismiss' => 'Dismiss',
         'confirm_button_text' => 'OK',
         'cancel_button_text' => 'Cancel',
-        'widget_remove_confirm' => 'Remove this widget?'
+        'widget_remove_confirm' => 'Remove this widget?',
     ],
     'datepicker' => [
         'previousMonth' => 'Previous Month',
@@ -61,24 +64,27 @@ return [
     ],
     'filter' => [
         'group' => [
-            'all' => 'all'
+            'all' => 'all',
+        ],
+        'scopes' => [
+            'apply_button_text' => 'Apply',
+            'clear_button_text' => 'Clear',
         ],
         'dates' => [
             'all' => 'all',
             'filter_button_text' => 'Filter',
-            'reset_button_text'  => 'Reset',
+            'reset_button_text' => 'Reset',
             'date_placeholder' => 'Date',
             'after_placeholder' => 'After',
-            'before_placeholder' => 'Before'
+            'before_placeholder' => 'Before',
         ],
         'numbers' => [
             'all' => 'all',
             'filter_button_text' => 'Filter',
-            'reset_button_text'  => 'Reset',
+            'reset_button_text' => 'Reset',
             'min_placeholder' => 'Min',
-            'max_placeholder' => 'Max'
-        ]
-
+            'max_placeholder' => 'Max',
+        ],
     ],
     'eventlog' => [
         'show_stacktrace' => 'Show the stacktrace',
@@ -93,7 +99,14 @@ return [
             'openWith' => 'Open with',
             'remember_choice' => 'Remember selected option for this session',
             'open' => 'Open',
-            'cancel' => 'Cancel'
-        ]
-    ]
+            'cancel' => 'Cancel',
+        ],
+    ],
+    'upload' => [
+        'max_files' => 'You can not upload any more files.',
+        'invalid_file_type' => 'You can\'t upload files of this type.',
+        'file_too_big' => 'File is too big ({{filesize}}MB). Max filesize: {{maxFilesize}}MB.',
+        'response_error' => 'Server responded with {{statusCode}} code.',
+        'remove_file' => 'Remove file',
+    ],
 ];
